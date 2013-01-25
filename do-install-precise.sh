@@ -6,7 +6,7 @@ TARGET_HOSTNAME="server1"
 TARGET_DOMAIN="example.org"
 TARGET_IPADDR="192.0.2.12"
 TARGET_GATEWAY="192.0.2.10"
-DEBOOTSTRAP_VERSION="1.0.40"
+DEBOOTSTRAP_VERSION="1.0.46"
 SSH_KEY="ssh-rsa A...paste-your-key-here...L admin@example.org"
 INITIAL_ROOT_PASSWORD="topsecret"
 
