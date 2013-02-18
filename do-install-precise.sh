@@ -123,7 +123,7 @@ EOF
 # TODO
 cat >/newroot/etc/hosts <<EOF
 127.0.0.1	localhost
-${TARGET_IPADDR ${TARGET_HOSTNAME}.${TARGET_DOMAIN} ${TARGET_HOSTNAME}
+${TARGET_IPADDR} ${TARGET_HOSTNAME}.${TARGET_DOMAIN} ${TARGET_HOSTNAME}
 
 # The following lines are desirable for IPv6 capable hosts
 ::1     ip6-localhost ip6-loopback
@@ -134,7 +134,7 @@ ff02::2 ip6-allrouters
 EOF
 
 # TODO
-echo "${TARGET_HOSTNAME} >/newroot/etc/hostname
+echo "${TARGET_HOSTNAME}" >/newroot/etc/hostname
 wait_for_key
 
 h "setting up apt"
@@ -228,6 +228,6 @@ echo "now reboot into the new machine and exec:"
 echo "  apt-get install ubuntu-standard tasksel"
 echo "  tasksel install server"
 echo "  dpkg-reconfigure postfix"
-echo "etc..
+echo "etc..."
 
 exit
