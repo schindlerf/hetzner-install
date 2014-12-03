@@ -1,0 +1,11 @@
+# All variables are required
+
+TARGET_HOSTNAME=""
+TARGET_DOMAIN=""
+TARGET_IPADDR=""
+TARGET_GATEWAY=""
+TARGET_NETMASK=""
+DEBOOTSTRAP_VERSION="1.0.59ubuntu0.2"
+SSH_KEY=$(cat ~/.ssh/authorized_keys)
+INITIAL_ROOT_PASSWORD="somepassword"
+UBUNTU_VERSION="trusty"

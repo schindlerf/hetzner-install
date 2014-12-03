@@ -2,20 +2,14 @@
 
 export LANG="C"
 
-TARGET_HOSTNAME="server1"
-TARGET_DOMAIN="example.org"
-TARGET_IPADDR="192.0.2.12"
-TARGET_GATEWAY="192.0.2.10"
-DEBOOTSTRAP_VERSION="1.0.46"
-SSH_KEY="ssh-rsa A...paste-your-key-here...L admin@example.org"
-INITIAL_ROOT_PASSWORD="topsecret"
+source ./conf
 
 function h {
 	echo ">>>>> $@ <<<<<"
 }
 
 function wait_for_key {
-  echo "done: press any key to continue"
+  echo -e "done: press any key to continue\n\n"
   read
 }
 
@@ -23,11 +17,9 @@ function wait_for_key {
 h "setting up lvm"
 pvcreate -ff -y /dev/md1
 vgcreate vg0 /dev/md1
-lvcreate -L5G -n rootfs vg0
-lvcreate -L1G -n var vg0
-lvcreate -L1G -n tmp vg0
-lvcreate -L1G -n home vg0
-lvcreate -L4G -n swap vg0
+lvcreate -L20G -n rootfs vg0
+lvcreate -L32G -n swap vg0
+lvcreate -l 100%FREE -n datafs vg0
 pvs
 vgs
 lvs
@@ -36,10 +28,8 @@ wait_for_key
 # create filesystems
 h "creating filesystems"
 mkfs.ext4 -L boot /dev/md0
-mkfs.xfs -f -L rootfs /dev/vg0/rootfs
-mkfs.xfs -f -L var /dev/vg0/var
-mkfs.xfs -f -L tmp /dev/vg0/tmp
-mkfs.xfs -f -L home /dev/vg0/home
+mkfs.ext4 -L rootfs /dev/vg0/rootfs
+mkfs.ext4 -L datafs /dev/vg0/datafs
 mkswap -f -L swap /dev/vg0/swap
 wait_for_key
 
@@ -47,13 +37,10 @@ wait_for_key
 h "mounting filesystems - stage 1"
 swapon -v /dev/vg0/swap
 mkdir -v /newroot
-mount -v -t xfs /dev/vg0/rootfs /newroot
+mount -v -t ext4 /dev/vg0/rootfs /newroot
 mkdir -v /newroot/tmp /newroot/var /newroot/home
 mkdir /newroot/boot
 mount -v -t ext4 /dev/md0 /newroot/boot
-mount -v -t xfs /dev/vg0/tmp /newroot/tmp
-mount -v -t xfs /dev/vg0/var /newroot/var
-mount -t xfs /dev/vg0/home /newroot/home
 wait_for_key
 
 # download and install debootstrap
@@ -64,7 +51,7 @@ rm debootstrap_*.deb
 wait_for_key
 
 h "running debootstrap"
-debootstrap --arch=amd64 --components=main,restricted,universe,multiverse --verbose precise /newroot http://archive.ubuntu.com/ubuntu/
+debootstrap --arch=amd64 --components=main,restricted,universe,multiverse --verbose ${UBUNTU_VERSION} /newroot http://archive.ubuntu.com/ubuntu/
 wait_for_key
 
 h "writing fstab"
@@ -73,10 +60,7 @@ cat >/newroot/etc/fstab <<EOF
 proc            /proc           proc    defaults  0 0
 none            /dev/pts        devpts  gid=5,mode=620 0 0
 #sys             /sys            sysfs   nodev,noexec,nosuid 0 0
-/dev/vg0/rootfs /               xfs     defaults            0 0
-/dev/vg0/var    /var            xfs     defaults            0 1
-/dev/vg0/tmp    /tmp            xfs     defaults            0 1
-/dev/vg0/home   /home           xfs     defaults            0 1
+/dev/vg0/rootfs /               ext4    defaults            0 0
 /dev/md/0       /boot           ext4    defaults            0 1
 /dev/vg0/swap   none            swap    sw                  0 0
 EOF
@@ -90,7 +74,6 @@ mount -v --rbind /proc /newroot/proc
 mount -v --rbind /sys /newroot/sys
 chroot /newroot locale-gen en_US.UTF-8
 chroot /newroot update-locale LANG=en_US.UTF-8
-#chroot /newroot /bin/bash -c "/usr/share/mdadm/mkconf >/etc/mdadm/mdadm.conf"
 wait_for_key
 
 chroot /newroot dpkg-reconfigure tzdata
@@ -106,17 +89,15 @@ iface lo inet loopback
 auto eth0
 iface eth0 inet static
   address ${TARGET_IPADDR}
-  netmask 255.255.255.255
+  netmask ${TARGET_NETMASK}
   gateway ${TARGET_GATEWAY}
-  pointopoint ${TARGET_GATEWAY}
 #  post-up mii-tool -F 100baseTx-FD eth0
 EOF
 
 # TODO
 cat >/newroot/etc/resolvconf/resolv.conf.d/original <<EOF
 search ${TARGET_DOMAIN}
-nameserver 213.133.100.100
-nameserver 213.133.99.99
+nameserver 8.8.8.8
 nameserver 213.133.98.98
 EOF
 
@@ -141,25 +122,25 @@ h "setting up apt"
 # install missing packages
 cp -f /newroot/etc/apt/sources.list /newroot/etc/apt/sources.list.orig
 cat >/newroot/etc/apt/sources.list <<EOF
-deb http://archive.ubuntu.com/ubuntu/ precise main restricted universe multiverse 
-#deb-src http://archive.ubuntu.com/ubuntu/ precise main restricted universe multiverse 
-deb http://archive.ubuntu.com/ubuntu/ precise-updates main restricted universe multiverse 
-#deb-src http://archive.ubuntu.com/ubuntu/ precise-updates main restricted universe multiverse 
-#deb http://archive.ubuntu.com/ubuntu/ precise-backports main restricted universe multiverse 
-#deb-src http://archive.ubuntu.com/ubuntu/ precise-backports main restricted universe multiverse 
-deb http://security.ubuntu.com/ubuntu precise-security main restricted universe multiverse 
-#deb-src http://security.ubuntu.com/ubuntu precise-security main restricted universe multiverse 
+deb http://archive.ubuntu.com/ubuntu/ ${UBUNTU_VERSION} main restricted universe multiverse 
+#deb-src http://archive.ubuntu.com/ubuntu/ ${UBUNTU_VERSION} main restricted universe multiverse 
+deb http://archive.ubuntu.com/ubuntu/ ${UBUNTU_VERSION}-updates main restricted universe multiverse 
+#deb-src http://archive.ubuntu.com/ubuntu/ ${UBUNTU_VERSION}-updates main restricted universe multiverse 
+#deb http://archive.ubuntu.com/ubuntu/ ${UBUNTU_VERSION}-backports main restricted universe multiverse 
+#deb-src http://archive.ubuntu.com/ubuntu/ ${UBUNTU_VERSION}-backports main restricted universe multiverse 
+deb http://security.ubuntu.com/ubuntu ${UBUNTU_VERSION}-security main restricted universe multiverse 
+#deb-src http://security.ubuntu.com/ubuntu ${UBUNTU_VERSION}-security main restricted universe multiverse 
 EOF
 wait_for_key
 
 h "update package index and install missing packages"
 chroot /newroot apt-get -y update
-chroot /newroot apt-get -y install openssh-server xfsprogs lvm2 mdadm initramfs-tools
-chroot /newroot /bin/bash -c "/usr/share/mdadm/mkconf >/etc/mdadm/mdadm.conf"
+chroot /newroot apt-get -y install openssh-server lvm2 mdadm initramfs-tools
+chroot /newroot /bin/bash -c "/usr/share/mdadm/mkconf > /etc/mdadm/mdadm.conf"
 wait_for_key
 
 h "install kernel and bootloader"
-chroot /newroot apt-get -y install linux-server
+chroot /newroot apt-get -y install linux-generic
 chroot /newroot apt-get -y install grub-pc
 chroot /newroot /bin/bash -c "update-initramfs -k all -u"
 #chroot /newroot /bin/bash -c 'echo -e "device (hd0) /dev/sda\nroot (hd0,0)\nsetup (hd0)\nquit"|grub --batch'

@@ -1,5 +1,8 @@
 #!/bin/bash
 
+vgchange -a n
+mdadm -S --scan
+
 DISKS="sda sdb"
 
 for d in $DISKS; do
@@ -11,7 +14,7 @@ for d in $DISKS; do
 	#sgdisk -t 3:ef02 /dev/$d
 
 	# create md0 partition
-	sgdisk -n 1:0:+512M -t 1:fd00 /dev/$d
+	sgdisk -n 1:0:+1G -t 1:fd00 /dev/$d
 	#sgdisk -t 1:fd00 /dev/$d
 	#sgdisk -c 1:md0 /dev/$d
 
@@ -20,7 +23,5 @@ for d in $DISKS; do
 done
 
 # create raid devices
-mdadm -C /dev/md0 -l 1 -n 2 /dev/sda1 /dev/sdb1
-mdadm -C /dev/md1 -l 1 -n 2 /dev/sda2 /dev/sdb2
-/usr/share/mdadm/mkconf >/etc/mdadm/mdadm.conf
-
+mdadm -C /dev/md0 -b internal -l 1 -n 2 /dev/sda1 /dev/sdb1
+mdadm -C /dev/md1 -b internal -l 1 -n 2 /dev/sda2 /dev/sdb2
