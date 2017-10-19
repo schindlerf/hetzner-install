@@ -13,46 +13,129 @@ function wait_for_key {
   echo -e "done: press any key to continue\n\n"
   read
 }
-
+###############################################################################
 # set hostname
 h "setting hostname"
-./steps/0.0_set_hostname.sh
+if [ -z "$TARGET_HOSTNAME" ]; then
+  echo "Type the hostname, followed by [ENTER]:"
+  read $TARGET_HOSTNAME;
+fi
+hostname $TARGET_HOSTNAME
 wait_for_key
+###############################################################################
 
 # clean old partition layout
 h "cleanup old partition layout"
-./steps/1.0_delete_old_partition.sh
+# deactivate all lvm 
+vgchange -a n
+
+# umount
+umount /dev/md*
+
+# Stop raid devices
+mdadm --stop /dev/md*
+
+# Zero 'em all
+mdadm --zero-superblock /dev/sd*
+
+mdadm -S --scan
+
+# Partition setup
+# Delte them all
+# TODO There may be more than 5 partitions
+for disk in `lsblk -d -o NAME -n grep sd`; do
+  sgdisk -Z $disk 
+done
 wait_for_key
+###############################################################################
+
+
+for d in `lsblk -d -o NAME -n grep sd`; do
+  parted -a optimal /dev/$d --script \
+    unit s \
+    mklabel gpt \
+    mkpart mbr 2048 4095 \
+    mkpart grub 4096 128MB \
+    mkpart raid 128MB 100GB \
+    mkpart btrfs 100GB 100% \
+    set 1 bios_grub on \
+    set 2 boot on \
+    set 2 esp on \
+    set 3 raid on;
+done
+###############################################################################
+
+# create raid devices
+yes | mdadm --create -n 2 -l 1 /dev/md0 /dev/sd[ab]2
+yes | mdadm --create -n 2 -l 1 /dev/md1 /dev/sd[ab]3
+
+###############################################################################
+
+if [ -z "$TARGET_LUKS_PASS" ]; then
+  echo "Type the luks passprase, followed by [ENTER]:"
+  read $TARGET_LUKS_PASS;
+fi
+
+echo -n $CRYPT_PASSWD | cryptsetup --batch-mode -c aes-cbc-essiv:sha256 -s 256 -y luksFormat /dev/md1
+echo -n $CRYPT_PASSWD |cryptsetup luksOpen /dev/md1 crypt
+
+###############################################################################
 
 # setup lvm
 h "setting up lvm"
-pvcreate -ff -y /dev/md1
-vgcreate vg0 /dev/md1
-lvcreate -L20G -n rootfs vg0
-lvcreate -L32G -n swap vg0
-lvcreate -l 100%FREE -n datafs vg0
+pvcreate -ff -y /dev/mapper/crypt
+vgcreate vg-`hostname` /dev/mapper/crypt
+
+lvcreate -n swap -L 16G vg-`hostname`
+lvcreate -n tmp -L 16G vg-`hostname`
+lvcreate -n usr -L 10G vg-`hostname`
+lvcreate -n home -L 20G vg-`hostname`
+lvcreate -n root -L 5G vg-`hostname`
+lvcreate -n var-log -L 8G vg-`hostname`
+lvcreate -n var -l100%FREE vg-`hostname` /dev/mapper/crypt
+
 pvs
 vgs
 lvs
 wait_for_key
+###############################################################################
 
 # create filesystems
 h "creating filesystems"
 mkfs.ext4 -L boot /dev/md0
-mkfs.ext4 -L rootfs /dev/vg0/rootfs
-mkfs.ext4 -L datafs /dev/vg0/datafs
-mkswap -f -L swap /dev/vg0/swap
+mkswap -f /dev/vg-`hostname`/swap
+mkfs.ext4 -L home /dev/vg-`hostname`/home
+mkfs.ext4 -L tmp /dev/vg-`hostname`/tmp
+mkfs.ext4 -L usr /dev/vg-`hostname`/usr
+mkfs.ext4 -L var /dev/vg-`hostname`/var
+mkfs.ext4 -L var /dev/vg-`hostname`/var-log
+mkfs.ext4 -L root /dev/vg-`hostname`/root
 wait_for_key
+###############################################################################
 
 # mount filesystems stage 1
 h "mounting filesystems - stage 1"
-swapon -v /dev/vg0/swap
-mkdir -v /newroot
-mount -v -t ext4 /dev/vg0/rootfs /newroot
-mkdir -v /newroot/tmp /newroot/var /newroot/home
-mkdir /newroot/boot
-mount -v -t ext4 /dev/md0 /newroot/boot
+swapon -v /dev/vg-`hostname`/swap
+
+if [ ! -d /target ]; then
+    mkdir -pv /target
+fi
+
+mount -v /dev/vg-$(hostname)/root /target/
+mkdir -p /target/{boot,usr,tmp,home,var,proc,dev,sys}
+mount -v /dev/vg-`hostname`/home /target/home/
+mount -v /dev/vg-`hostname`/tmp /target/tmp/
+mount -v /dev/vg-`hostname`/usr /target/usr/
+mount -v /dev/vg-`hostname`/var /target/var/
+mkdir -pv /target/var/log
+mount -v /dev/vg-`hostname`/var-log /target/var/log/
+mount -v --rbind /proc/ /target/proc/
+mount -v --rbind /dev/ /target/dev/
+mount -v --rbind /sys/ /target/sys/
+mount -v --rbind /dev/pts /target/dev/pts
+mount -v /dev/md0 /target/boot
 wait_for_key
+###############################################################################
 
 # download and install debootstrap
 h "installing debootstrap"
