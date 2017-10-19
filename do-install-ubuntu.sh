@@ -2,7 +2,8 @@
 
 export LANG="C"
 
-source ./conf
+source ./commom.conf
+source ./$1.conf
 
 function h {
 	echo ">>>>> $@ <<<<<"
@@ -12,6 +13,16 @@ function wait_for_key {
   echo -e "done: press any key to continue\n\n"
   read
 }
+
+# set hostname
+h "setting hostname"
+./steps/0.0_set_hostname.sh
+wait_for_key
+
+# clean old partition layout
+h "cleanup old partition layout"
+./steps/1.0_delete_old_partition.sh
+wait_for_key
 
 # setup lvm
 h "setting up lvm"
