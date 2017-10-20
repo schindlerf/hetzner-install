@@ -1,5 +1,7 @@
 #!/bin/bash
+# Wo möglich Funktionen aus dem Hetzner Installimage Script benutzen
 
+source /root/.oldroot/nfs/install/config.sh
 export LANG="C"
 
 source ./commom.conf
@@ -42,7 +44,6 @@ mdadm -S --scan
 
 # Partition setup
 # Delte them all
-# TODO There may be more than 5 partitions
 for disk in `lsblk -d -o NAME -n | grep sd`; do
   sgdisk -Z $disk 
 done
@@ -117,19 +118,19 @@ wait_for_key
 h "mounting filesystems - stage 1"
 swapon -v /dev/vg-`hostname`/swap
 
-if [ ! -d /target ]; then
-    mkdir -pv /target
+if [ ! -d /hdd ]; then
+    mkdir -pv /hdd
 fi
 
-mount -v /dev/vg-$(hostname)/root /target/
-mkdir -p /target/{boot,usr,tmp,home,var,proc,dev,sys}
-mount -v /dev/vg-`hostname`/home /target/home/
-mount -v /dev/vg-`hostname`/tmp /target/tmp/
-mount -v /dev/vg-`hostname`/usr /target/usr/
-mount -v /dev/vg-`hostname`/var /target/var/
-mkdir -pv /target/var/log
-mount -v /dev/vg-`hostname`/var-log /target/var/log/
-mount -v /dev/md0 /target/boot
+mount -v /dev/vg-$(hostname)/root /hdd/
+mkdir -p /hdd/{boot,usr,tmp,home,var,proc,dev,sys}
+mount -v /dev/vg-`hostname`/home /hdd/home/
+mount -v /dev/vg-`hostname`/tmp /hdd/tmp/
+mount -v /dev/vg-`hostname`/usr /hdd/usr/
+mount -v /dev/vg-`hostname`/var /hdd/var/
+mkdir -pv /hdd/var/log
+mount -v /dev/vg-`hostname`/var-log /hdd/var/log/
+mount -v /dev/md0 /hdd/boot
 wait_for_key
 ###############################################################################
 
@@ -137,7 +138,7 @@ h "running debootstrap"
 debootstrap \
   --components=main,contrib,non-free \
   --verbose ${DEBIAN_VERSION} \
-  /target \
+  /hdd \
   http://deb.debian.org/debian/
 wait_for_key
 ###############################################################################
@@ -176,27 +177,27 @@ nfs.hetzner.de:/nfs /mnt/hetzner_nfs nfs ro 0 0
 EOF
 ###############################################################################
 
-chroot /target /bin/bash -c "grep -v swap /etc/fstab >/etc/mtab"
+chroot /hdd /bin/bash -c "grep -v swap /etc/fstab >/etc/mtab"
 wait_for_key
 
 h "mounting filesystems - stage 2"
-mount -v --rbind /proc/ /target/proc/
-mount -v --rbind /dev/ /target/dev/
-mount -v --rbind /sys/ /target/sys/
-#mount -v --rbind /dev/pts /target/dev/pts
+mount -v --rbind /proc/ /hdd/proc/
+mount -v --rbind /dev/ /hdd/dev/
+mount -v --rbind /sys/ /hdd/sys/
+#mount -v --rbind /dev/pts /hdd/dev/pts
 
 ###############################################################################
-chroot /target locale-gen de_DE.UTF-8
-chroot /target update-locale LANG=de_DE.UTF-8
+chroot /hdd locale-gen de_DE.UTF-8
+chroot /hdd update-locale LANG=de_DE.UTF-8
 wait_for_key
 
 ###############################################################################
-chroot /target dpkg-reconfigure tzdata
+chroot /hdd dpkg-reconfigure tzdata
 
 ###############################################################################
 h "configure networking"
 
-cat >/target/etc/network/interfaces <<EOF
+cat >/hdd/etc/network/interfaces <<EOF
 # cat /etc/network/interfaces
 # interfaces(5) file used by ifup(8) and ifdown(8)
 # Include files from /etc/network/interfaces.d:
@@ -227,10 +228,10 @@ pointopoint ${TARGET_GATEWAY}
 EOF
 
 ###############################################################################
-cp /etc/resolv.conf /target/etc/resolv.conf
-sed -i -e 's/your-server.de/'${TARGET_DOMAIN}'/g' /target/etc/resolv.conf
+cp /etc/resolv.conf /hdd/etc/resolv.conf
+sed -i -e 's/your-server.de/'${TARGET_DOMAIN}'/g' /hdd/etc/resolv.conf
 
-cat >/target/etc/hosts <<EOF
+cat >/hdd/etc/hosts <<EOF
 127.0.0.1	localhost
 ${TARGET_IPADDR} ${TARGET_HOSTNAME}.${TARGET_DOMAIN} ${TARGET_HOSTNAME}
 
@@ -242,7 +243,7 @@ ff02::1 ip6-allnodes
 ff02::2 ip6-allrouters
 EOF
 
-echo "${TARGET_HOSTNAME}" >/target/etc/hostname
+echo "${TARGET_HOSTNAME}" >/hdd/etc/hostname
 wait_for_key
 
 ###############################################################################
@@ -251,7 +252,7 @@ h "setting up apt"
 # install missing packages
 
 cp -f /newroot/etc/apt/sources.list /newroot/etc/apt/sources.list.orig
-cat <<EOF > /target/etc/apt/sources.list
+cat <<EOF > /hdd/etc/apt/sources.list
 
 # Packages from the Hetzner Debian Mirror
 #deb ftp://mirror.hetzner.de/debian/packages ${DEBIAN_VERSION} main contrib non-free
@@ -267,10 +268,10 @@ wait_for_key
 ###############################################################################
 
 h "update package index and install missing packages"
-chroot /target apt-get -y update
-chroot /target apt-get -y install openssh-server lvm2 mdadm initramfs-tools
-chroot /target /bin/bash -c "/usr/share/mdadm/mkconf > /etc/mdadm/mdadm.conf"
-chroot /target apt-get -y install console-common,manpages-de,ifupdown,cryptsetup,\
+chroot /hdd apt-get -y update
+chroot /hdd apt-get -y install openssh-server lvm2 mdadm initramfs-tools
+chroot /hdd /bin/bash -c "/usr/share/mdadm/mkconf > /etc/mdadm/mdadm.conf"
+chroot /hdd apt-get -y install console-common,manpages-de,ifupdown,cryptsetup,\
   manpages-dev,sudo,vim,console-data,salt-minion,htop,aptitude,rkhunter,glances,\
   git,busybox,openssh-blacklist,manpages-posix-dev,dropbear-initramfs,salt-master,\
   apt-listchanges,logcheck,hashalot,john,firmware-realtek,debsecan,manpages-de-dev,\
@@ -280,19 +281,19 @@ chroot /target apt-get -y install console-common,manpages-de,ifupdown,cryptsetup
   pciutils,pv,htop,radvd,tmux,fail2ban,python-gamin,debian-security-support,\
   dnsutils,console-setup,ebtables,parted
 
-chroot /target /bin/bash -c "dpkg-reconfigure -plow unattended-upgrades"
+chroot /hdd /bin/bash -c "dpkg-reconfigure -plow unattended-upgrades"
 
 wait_for_key
 ###############################################################################
 
 h "install kernel and bootloader"
-chroot /target apt-get -y install linux-image-amd64
-chroot /target apt-get -y install grub2
-chroot /target /bin/bash -c "update-initramfs -k all -u"
+chroot /hdd apt-get -y install linux-image-amd64
+chroot /hdd apt-get -y install grub2
+chroot /hdd /bin/bash -c "update-initramfs -k all -u"
 for disk in `lsblk -d -o NAME -n | grep sd`; do
-  chroot /target /bin/bash -c "grub-install --no-floppy --recheck /dev/$disk"
+  chroot /hdd /bin/bash -c "grub-install --no-floppy --recheck /dev/$disk"
 done
-chroot /target /bin/bash -c "update-grub2"
+chroot /hdd /bin/bash -c "update-grub2"
 wait_for_key
 ###############################################################################
 
