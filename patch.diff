@@ -1,0 +1,20 @@
+diff --git a/functions.sh b/functions.sh
+old mode 100644
+new mode 100755
+index ecd00e2..a4d4c83
+--- a/functions.sh
++++ b/functions.sh
+@@ -1511,6 +1511,13 @@ stop_lvm_raid() {
+   done
+ }
+ 
++#
++# stop_luks_devices
++#
++stop_luks_devices() {
++  Close_luks=$(dmsetup ls | cut -d$'\t' -f 1 | xargs -I % cryptsetup luksClose %)
++  $Close_luks >> "$LOGFILE" 2>&1
++}
+ 
+ # delete partitiontable
+ # delete_partitions "DRIVE"
