@@ -1,33 +1,9 @@
 #!/bin/bash
 # Wo möglich Funktionen aus dem Hetzner Installimage Script benutzen
 
-source /root/.oldroot/nfs/install/config.sh
-export LANG="C"
-
-source ./commom.conf
-source ./$1.conf
-
-function h {
-	echo ">>>>> $@ <<<<<"
-}
-
-function wait_for_key {
-  echo -e "done: press any key to continue\n\n"
-  read
-}
-###############################################################################
-# set hostname
-h "setting hostname"
-if [ -z "$TARGET_HOSTNAME" ]; then
-  echo "Type the hostname, followed by [ENTER]:"
-  read $TARGET_HOSTNAME;
-fi
-hostname $TARGET_HOSTNAME
-wait_for_key
-###############################################################################
+exit
 
 # clean old partition layout
-h "cleanup old partition layout"
 # deactivate all lvm 
 vgchange -a n
 
@@ -45,9 +21,9 @@ mdadm -S --scan
 # Partition setup
 # Delte them all
 for disk in `lsblk -d -o NAME -n | grep sd`; do
-  sgdisk -Z $disk 
+  sgdisk -Z /dev/$disk 
 done
-wait_for_key
+
 ###############################################################################
 
 
@@ -56,66 +32,59 @@ for d in `lsblk -d -o NAME -n | grep sd`; do
     unit s \
     mklabel gpt \
     mkpart mbr 2048 4095 \
-    mkpart grub 4096 128MB \
-    mkpart raid 128MB 100GB \
-    mkpart btrfs 100GB 100% \
+    mkpart grub 4096 256MB \
+    mkpart raid 256MB 100% \
     set 1 bios_grub on \
     set 2 boot on \
-    set 2 esp on \
     set 3 raid on;
 done
+partprobe
 ###############################################################################
 
 # create raid devices
-yes | mdadm --create -n 2 -l 1 /dev/md0 /dev/sd[ab]2
-yes | mdadm --create -n 2 -l 1 /dev/md1 /dev/sd[ab]3
+
+yes | mdadm -q --create -n 2 -l 1 /dev/md0 /dev/sda2 /dev/sdb2;
+yes | mdadm -q --create -n 2 -l 1 /dev/md1 /dev/sda3 /dev/sdb3;
+
 
 ###############################################################################
-
-if [ -z "$TARGET_LUKS_PASS" ]; then
-  echo "Type the luks passprase, followed by [ENTER]:"
-  read $TARGET_LUKS_PASS;
-fi
-
+CRYPT_PASSWD='test'
 echo -n $CRYPT_PASSWD | cryptsetup --batch-mode -c aes-cbc-essiv:sha256 -s 256 -y luksFormat /dev/md1
 echo -n $CRYPT_PASSWD |cryptsetup luksOpen /dev/md1 crypt
 
 ###############################################################################
 
 # setup lvm
-h "setting up lvm"
 pvcreate -ff -y /dev/mapper/crypt
 vgcreate vg-`hostname` /dev/mapper/crypt
 
 lvcreate -n swap -L 16G vg-`hostname`
 lvcreate -n tmp -L 16G vg-`hostname`
 lvcreate -n usr -L 10G vg-`hostname`
-lvcreate -n home -L 20G vg-`hostname`
+lvcreate -n home -L 10G vg-`hostname`
 lvcreate -n root -L 5G vg-`hostname`
-lvcreate -n var-log -L 8G vg-`hostname`
-lvcreate -n var -l100%FREE vg-`hostname` /dev/mapper/crypt
+lvcreate -n var-log -L 10G vg-`hostname`
+lvcreate -n var -L 10G vg-`hostname`
+lvcreate -n gluster -l100%FREE vg-`hostname` /dev/mapper/crypt
 
 pvs
 vgs
 lvs
-wait_for_key
 ###############################################################################
 
 # create filesystems
-h "creating filesystems"
 mkfs.ext4 -L boot /dev/md0
 mkswap -f /dev/vg-`hostname`/swap
-mkfs.ext4 -L home /dev/vg-`hostname`/home
 mkfs.ext4 -L tmp /dev/vg-`hostname`/tmp
 mkfs.ext4 -L usr /dev/vg-`hostname`/usr
-mkfs.ext4 -L var /dev/vg-`hostname`/var
-mkfs.ext4 -L var /dev/vg-`hostname`/var-log
+mkfs.ext4 -L home /dev/vg-`hostname`/home
 mkfs.ext4 -L root /dev/vg-`hostname`/root
-wait_for_key
+mkfs.ext4 -L varlog /dev/vg-`hostname`/var-log
+mkfs.ext4 -L var /dev/vg-`hostname`/var
+mkfs.ext4 -L gluster /dev/vg-`hostname`/gluster
 ###############################################################################
 
 # mount filesystems stage 1
-h "mounting filesystems - stage 1"
 swapon -v /dev/vg-`hostname`/swap
 
 if [ ! -d /hdd ]; then
@@ -131,23 +100,18 @@ mount -v /dev/vg-`hostname`/var /hdd/var/
 mkdir -pv /hdd/var/log
 mount -v /dev/vg-`hostname`/var-log /hdd/var/log/
 mount -v /dev/md0 /hdd/boot
-wait_for_key
 ###############################################################################
 
 h "running debootstrap"
 debootstrap \
   --components=main,contrib,non-free \
-  --verbose ${DEBIAN_VERSION} \
+  --verbose stretch \
   /hdd \
   http://deb.debian.org/debian/
-wait_for_key
 ###############################################################################
 
-h "writing fstab"
 
-###############################################################################
-
-cat >/newroot/etc/fstab <<EOF
+cat >/hdd/etc/fstab <<EOF
 
 # <file system> <mount point>   <type>  <options>       <dump>  <pass>
 # Boot
@@ -178,24 +142,20 @@ EOF
 ###############################################################################
 
 chroot /hdd /bin/bash -c "grep -v swap /etc/fstab >/etc/mtab"
-wait_for_key
 
-h "mounting filesystems - stage 2"
 mount -v --rbind /proc/ /hdd/proc/
 mount -v --rbind /dev/ /hdd/dev/
 mount -v --rbind /sys/ /hdd/sys/
-#mount -v --rbind /dev/pts /hdd/dev/pts
 
 ###############################################################################
-chroot /hdd locale-gen de_DE.UTF-8
-chroot /hdd update-locale LANG=de_DE.UTF-8
-wait_for_key
+chroot /hdd /bin/bash -c "apt install locales"
+chroot /hdd /bin/bash -c "locale-gen de_DE.UTF-8"
+chroot /hdd /bin/bash -c "update-locale LANG=de_DE.UTF-8"
 
 ###############################################################################
-chroot /hdd dpkg-reconfigure tzdata
+chroot /hdd /bin/bash -c "dpkg-reconfigure tzdata"
 
 ###############################################################################
-h "configure networking"
 
 cat >/hdd/etc/network/interfaces <<EOF
 # cat /etc/network/interfaces
@@ -244,14 +204,12 @@ ff02::2 ip6-allrouters
 EOF
 
 echo "${TARGET_HOSTNAME}" >/hdd/etc/hostname
-wait_for_key
 
 ###############################################################################
 
-h "setting up apt"
 # install missing packages
 
-cp -f /newroot/etc/apt/sources.list /newroot/etc/apt/sources.list.orig
+cp -f /hdd/etc/apt/sources.list /newroot/etc/apt/sources.list.orig
 cat <<EOF > /hdd/etc/apt/sources.list
 
 # Packages from the Hetzner Debian Mirror
@@ -264,29 +222,28 @@ deb http://security.debian.org/ ${DEBIAN_VERSION}/updates main contrib non-free
 deb http://ftp.de.debian.org/debian/ ${DEBIAN_VERSION}-backports main contrib non-free
 deb http://ftp.de.debian.org/debian ${DEBIAN_VERSION}-proposed-updates main contrib non-free
 EOF
-wait_for_key
 ###############################################################################
 
 h "update package index and install missing packages"
+chmod go+w /hdd/tmp
+chmod o+t /hdd/tmp
 chroot /hdd apt-get -y update
 chroot /hdd apt-get -y install openssh-server lvm2 mdadm initramfs-tools
 chroot /hdd /bin/bash -c "/usr/share/mdadm/mkconf > /etc/mdadm/mdadm.conf"
-chroot /hdd apt-get -y install console-common,manpages-de,ifupdown,cryptsetup,\
-  manpages-dev,sudo,vim,console-data,salt-minion,htop,aptitude,rkhunter,glances,\
-  git,busybox,openssh-blacklist,manpages-posix-dev,dropbear-initramfs,salt-master,\
-  apt-listchanges,logcheck,hashalot,john,firmware-realtek,debsecan,manpages-de-dev,\
-  chkrootkit,bzip2,bash-completion,task-german,keyboard-configuration,most,\
-  debootstrap,less,exim4-daemon-light,sensord,etckeeper,locales,manpages-posix,\
-  iotop,smartmontools,iftop,intel-microcode,deborphan,command-not-found,nfs-common,\
-  pciutils,pv,htop,radvd,tmux,fail2ban,python-gamin,debian-security-support,\
-  dnsutils,console-setup,ebtables,parted
+chroot /hdd /bin/bash -c "apt-get -y install console-common manpages-de ifupdown cryptsetup \
+  manpages-dev sudo vim console-data htop aptitude rkhunter glances \
+  git busybox manpages-posix-dev dropbear-initramfs \
+  apt-listchanges logcheck hashalot john firmware-realtek debsecan manpages-de-dev \
+  chkrootkit bzip2 bash-completion task-german keyboard-configuration most \
+  less exim4-daemon-light etckeeper locales manpages-posix \
+  iotop smartmontools iftop intel-microcode deborphan command-not-found nfs-common \
+  pciutils pv htop radvd tmux fail2ban python-gamin debian-security-support \
+  dnsutils console-setup parted unattended-upgrades"
 
 chroot /hdd /bin/bash -c "dpkg-reconfigure -plow unattended-upgrades"
 
-wait_for_key
 ###############################################################################
 
-h "install kernel and bootloader"
 chroot /hdd apt-get -y install linux-image-amd64
 chroot /hdd apt-get -y install grub2
 chroot /hdd /bin/bash -c "update-initramfs -k all -u"
@@ -294,23 +251,19 @@ for disk in `lsblk -d -o NAME -n | grep sd`; do
   chroot /hdd /bin/bash -c "grub-install --no-floppy --recheck /dev/$disk"
 done
 chroot /hdd /bin/bash -c "update-grub2"
-wait_for_key
 ###############################################################################
 
 
-h "installing authorized_keys"
-mkdir -m 0700 /newroot/root/.ssh
-cat >/newroot/root/.ssh/authorized_keys <<EOF
+mkdir -m 0700 /hdd/root/.ssh
+cat >/hdd/root/.ssh/authorized_keys <<EOF
 ${SSH_KEY}
 EOF
 
-h "setting root password"
-chroot /newroot passwd -S root
-cat <<EOF | chroot /newroot passwd root
+chroot /hdd passwd -S root
+cat <<EOF | chroot /hdd passwd root
 ${INITIAL_ROOT_PASSWORD}
 ${INITIAL_ROOT_PASSWORD}
 EOF
-wait_for_key
 
 echo "now reboot into the new machine "
 
